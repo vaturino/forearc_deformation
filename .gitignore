@@ -1,0 +1,5 @@
+visualization/paraview_inputs/*
+slab_geometries/
+slab2/
+lithosphere_data/
+conda_instructions
