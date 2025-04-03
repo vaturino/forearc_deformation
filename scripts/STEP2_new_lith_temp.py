@@ -24,7 +24,7 @@ expansivity = 3e-5
 
 min_lat = -60
 max_lat = 20
-min_lon = 220
+min_lon = 240
 max_lon = 320
 
 
