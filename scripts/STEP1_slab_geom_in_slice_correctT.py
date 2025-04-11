@@ -39,7 +39,7 @@ def calculate_composi(lon_t, glon, glat, gdepth, lat_t, depth_t, dx, dz):
 T1 = time.time()
 
 # Define grid resolution to match the global script
-dx = 0.2  # Longitude grid resolution
+dx = 0.1  # Longitude grid resolution
 dz = 10   # Depth grid resolution
 
 min_lat = -60
@@ -50,7 +50,7 @@ max_lon = 320
 # Define regional grid setup
 glon = np.linspace(min_lon, max_lon, int((max_lon - min_lon) / dx) + 1, endpoint=True, dtype=np.float32)  # Longitude range
 glat = np.linspace(min_lat, max_lat, int((max_lat - min_lat) / dx) + 1, endpoint=True, dtype=np.float32)  # Latitude range
-gdepth = np.linspace(0, 2900, int(2900 / dz) + 1, endpoint=True, dtype=np.float32)  # Depth range
+gdepth = np.linspace(0, 1100, int(1100 / dz) + 1, endpoint=True, dtype=np.float32)  # Depth range
 
 # Define parameters
 temp_ref = 1573  # Kelvin Mantle interior temperature

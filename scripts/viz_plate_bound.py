@@ -88,11 +88,14 @@ plate_boundaries = read_plate_boundary_file(file_path)
 
 
 # Define the min and max latitudes and longitudes
-min_lon, max_lon = 240, 320  # Min and max longitude range
-min_lat, max_lat = -60, 20   # Min and max latitude range
+min_lon, max_lon = 0, 360  # Min and max longitude range
+min_lat, max_lat = -90, 90   # Min and max latitude range
 
 r_min_lon, r_max_lon = 280, 300  # Min and max longitude range for the mods
 r_min_lat, r_max_lat = -30, -10   # Min and max latitude range for the mods
+
+t_min_lon, t_max_lon = 275, 300  # Min and max longitude range for the mods
+t_min_lat, t_max_lat = -5, 5   # Min and max latitude range for the mods
 
 # Initialize arrays to store coordinates for each region
 coords_NZ = []
@@ -114,6 +117,9 @@ coords_SA.columns = ['lon', 'lat']
 #limit coordinates to the defined range
 coords_NZ = coords_NZ[(coords_NZ['lon'] >= min_lon) & (coords_NZ['lon'] <= max_lon) & (coords_NZ['lat'] >= min_lat) & (coords_NZ['lat'] <= max_lat)]
 coords_SA = coords_SA[(coords_SA['lon'] >= min_lon) & (coords_SA['lon'] <= max_lon) & (coords_SA['lat'] >= min_lat) & (coords_SA['lat'] <= max_lat)]
+
+
+
 
 
 # Ensure the DataFrames are not empty before proceeding
@@ -154,11 +160,68 @@ for idx, row in coords_SA_adjusted.iterrows():
             coords_SA_adjusted.at[idx, 'lon'] = closest_nz_coord['lon']
             coords_SA_adjusted.at[idx, 'lat'] = closest_nz_coord['lat']
 
+for idx, row in coords_SA_adjusted.iterrows():
+    # Check if the current SA coordinates are within the defined region
+    if t_min_lon <= row['lon'] <= t_max_lon and t_min_lat <= row['lat'] <= t_max_lat:
+        # Find the closest matching NZ coordinates in the region
+        matching_nz_coords = coords_NZ[(coords_NZ['lon'] >= t_min_lon) & 
+                                       (coords_NZ['lon'] <= t_max_lon) & 
+                                       (coords_NZ['lat'] >= t_min_lat) & 
+                                       (coords_NZ['lat'] <= t_max_lat)]
+        
+        # If a matching NZ coordinate is found, replace the SA coordinates
+        if not matching_nz_coords.empty:
+            closest_nz_coord = find_closest_nz_coord(row['lon'], row['lat'], matching_nz_coords)
+            coords_SA_adjusted.at[idx, 'lon'] = closest_nz_coord['lon']
+            coords_SA_adjusted.at[idx, 'lat'] = closest_nz_coord['lat']
+
+
+
 if not coords_SA_adjusted.iloc[0].equals(coords_SA_adjusted.iloc[-1]):
     coords_SA_adjusted = pd.concat([coords_SA_adjusted, coords_SA_adjusted.iloc[[0]]], ignore_index=True)
 
 if not coords_NZ.iloc[0].equals(coords_NZ.iloc[-1]):
     coords_NZ = pd.concat([coords_NZ, coords_NZ.iloc[[0]]], ignore_index=True)
+
+
+
+# Check if the first and last coordinates are the same, and if so, loop them back to close the loop
+if not coords_SA_adjusted.iloc[0].equals(coords_SA_adjusted.iloc[-1]):
+    coords_SA_adjusted = pd.concat([coords_SA_adjusted, coords_SA_adjusted.iloc[[0]]], ignore_index=True)
+
+if not coords_NZ.iloc[0].equals(coords_NZ.iloc[-1]):
+    coords_NZ = pd.concat([coords_NZ, coords_NZ.iloc[[0]]], ignore_index=True)
+
+
+
+# Remove the original points in the specified range
+coords_NZ = coords_NZ[~(coords_NZ['lon'].between(280.5, 282.5) & coords_NZ['lat'].between(5, 8))]
+
+# # Find the last point of the Nazca plate (SA) at approximately 7 degrees latitude and 280 degrees longitude
+# last_point = coords_NZ[(coords_NZ['lon'] >= 280) & (coords_NZ['lon'] <= 283) & (coords_NZ['lat'] <= 8) & (coords_NZ['lat'] >= 6)].iloc[-1]
+# first_point = coords_SA[(coords_SA['lon'] >= 287) & (coords_SA['lon'] <= 289) & (coords_SA['lat'] <= 8) & (coords_SA['lat'] >= 7.5)].iloc[0]
+
+# # extend nazca between the two points
+# coords_NZ = pd.concat([coords_NZ, pd.DataFrame({'lon': [last_point['lon'], first_point['lon']], 'lat': [last_point['lat'], first_point['lat']]})], ignore_index=True)
+# # Remove the original points in the specified range
+# coords_NZ = coords_NZ[~(coords_NZ['lon'].between(280.5, 282.5) & coords_NZ['lat'].between(5, 8))]
+# # between t
+
+
+#save a copy of adjusted Sa and NZ coordinates
+coords_SA_adjusted.to_csv('/home/vturino/PhD/projects/forearc_deformation/plates/coords_SA_adjusted.csv', index=False)
+coords_NZ.to_csv('/home/vturino/PhD/projects/forearc_deformation/plates/coords_NZ.csv', index=False)
+
+# Create a figure and plot just the boundaries, no coastline
+fig, ax = plt.subplots(figsize=(10, 10))
+# plt.scatter(last_point['lon'], last_point['lat'], color='green', label='Last Point of NZ Plate')
+# plt.scatter(first_point['lon'], first_point['lat'], color='orange', label='First Point of SA Plate')
+ax.plot(coords_NZ['lon'], coords_NZ['lat'], color='blue', linewidth=2, label='NZ Plate Boundary')
+ax.plot(coords_SA_adjusted['lon'], coords_SA_adjusted['lat'], color='red', linewidth=2, label='SA Plate Boundary')
+plt.legend()
+plt.show()
+exit()
+
 
 tolerance = 1e-6  # Define a tolerance for matching coordinates
 
@@ -183,18 +246,8 @@ coords_NZ['lat_diff'] = coords_NZ['lat'].diff().abs()
 coords_NZ = coords_NZ[(coords_NZ['lon_diff'] < 10) & (coords_NZ['lat_diff'] < 10)]
 coords_NZ = coords_NZ.drop(columns=['lon_diff', 'lat_diff'])
 
-# Check if the first and last coordinates are the same, and if so, loop them back to close the loop
-if not coords_SA_adjusted.iloc[0].equals(coords_SA_adjusted.iloc[-1]):
-    coords_SA_adjusted = pd.concat([coords_SA_adjusted, coords_SA_adjusted.iloc[[0]]], ignore_index=True)
-
-if not coords_NZ.iloc[0].equals(coords_NZ.iloc[-1]):
-    coords_NZ = pd.concat([coords_NZ, coords_NZ.iloc[[0]]], ignore_index=True)
 
 
-
-#save a copy of adjusted Sa and NZ coordinates
-coords_SA_adjusted.to_csv('/home/vturino/PhD/projects/forearc_deformation/plates/coords_SA_adjusted.csv', index=False)
-coords_NZ.to_csv('/home/vturino/PhD/projects/forearc_deformation/plates/coords_NZ.csv', index=False)
 
 # Convert DataFrames to dictionaries
 mat_data = {
@@ -208,15 +261,35 @@ mat_data = {
     }
 }
 
+
+
 # Save to .mat files
 savemat('/home/vturino/PhD/projects/forearc_deformation/plates/coords_SA_adjusted.mat', {'coords_SA_adjusted': mat_data['coords_SA_adjusted']})
 savemat('/home/vturino/PhD/projects/forearc_deformation/plates/coords_NZ.mat', {'coords_NZ': mat_data['coords_NZ']})
 
 
+# Combine the two sets of coordinates
+combined_lon = np.concatenate([coords_NZ['lon'].to_numpy(), coords_SA_adjusted['lon'].to_numpy()])
+combined_lat = np.concatenate([coords_NZ['lat'].to_numpy(), coords_SA_adjusted['lat'].to_numpy()])
+
+# Reshape to column vector (6870x1-like shape)
+combined_lon = combined_lon.reshape(-1, 1)
+combined_lat = combined_lat.reshape(-1, 1)
+
+# Save into a .mat file with the expected keys
+savemat('/home/vturino/PhD/projects/forearc_deformation/plates/plate_boundaries.mat', {
+    'lon': combined_lon,
+    'lat': combined_lat
+})
+
+
 
 # Create a figure and plot just the boundaries, no coastline
 fig, ax = plt.subplots(figsize=(10, 10))
-ax.plot(coords_NZ['lon'], coords_NZ['lat'], color='blue', linewidth=2, label='NZ Plate Boundary')
-ax.plot(coords_SA_adjusted['lon'], coords_SA_adjusted['lat'], color='red', linewidth=2, label='SA Plate Boundary')
+# ax.plot(coords_NZ['lon'], coords_NZ['lat'], color='blue', linewidth=2, label='NZ Plate Boundary')
+# ax.plot(coords_SA_adjusted['lon'], coords_SA_adjusted['lat'], color='red', linewidth=2, label='SA Plate Boundary')
+ax.scatter(coords_NZ['lon'], coords_NZ['lat'], color='blue', label='NZ Points', s=10)
+ax.scatter(coords_SA_adjusted['lon'], coords_SA_adjusted['lat'], color='red', label='SA Points', s=10)
+plt.legend()
 plt.show()
 

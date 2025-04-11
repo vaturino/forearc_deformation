@@ -2,28 +2,77 @@
 
 import netCDF4 as nc
 import numpy as np
-from scipy.interpolate import interp1d, interpn,griddata
-from shapely.geometry import Point, Polygon
-import pandas as pd
+from scipy.interpolate import interp1d, interpn, griddata, RegularGridInterpolator
 import time
 import scipy.io
 from scipy.ndimage import generate_binary_structure, binary_dilation
 from scipy.ndimage import label
 import matplotlib.pyplot as plt
+import pandas as pd
+from shapely.geometry import Point, Polygon
+import scipy.ndimage as ndimage
+import matplotlib.pyplot as plt
 
 
+# Define the moving average function
+def moving_average(arr, window_size):
+    # Apply moving average along a 1D array
+    return np.convolve(arr, np.ones(window_size) / window_size, mode='same')
+
+# Function to smooth the array along the longitude (or latitude) axis
+def smooth_within_window(arr, degree_window, axis=0):
+    # Apply moving average along a given axis
+    return np.apply_along_axis(moving_average, axis, arr, window_size=degree_window)
+
+
+
+
+
+
+
+T1 = time.time()
+print(T1)
+# Define grid resolution to match the global script
+dx = 0.2  # Longitude grid resolution
+dz = 10   # Depth grid resolution
+dx_high = 0.1  # refined horizontal resolution
+dz_high = 5    # refined vertical resolution
+
+# Domain limits
 min_lat = -60
 max_lat = 20
 min_lon = 240
 max_lon = 320
+max_depth = 1100
+# High-resolution domain limits
+min_lat_high = -50
+max_lat_high = 10
+min_lon_high = 277
+max_lon_high = 300
+min_depth_high = 0
+max_depth_high = 700
 
-T1 = time.time()
-print(T1)
+# Non uniform latitude
+lat_low_1 = np.arange(min_lat, min_lat_high, dx)
+lat_high = np.arange(min_lat_high, max_lat_high, dx_high)
+lat_low_2 = np.arange(max_lat_high, max_lat + dx, dx)  # Include max_lat
+glat1 = np.unique(np.concatenate((lat_low_1, lat_high, lat_low_2)))
+np.sort(glat1)
 
-# Make gridded vertical plate boundaries in 2-d from Bird2003 dataset
-# specify parameters
+# Non uniform longitude
+lon_low_1 = np.arange(min_lon, min_lon_high, dx)
+lon_high = np.arange(min_lon_high, max_lon_high, dx_high)
+lon_low_2 = np.arange(max_lon_high, max_lon + dx, dx)  # Include max_lon
+glon1 = np.unique(np.concatenate((lon_low_1, lon_high, lon_low_2)))
+np.sort(glon1)
+
+# Non uniform depth
+depth_low_1 = np.arange(max_depth_high, max_depth, dz)
+depth_high = np.arange(min_depth_high, max_depth_high, dz_high)
+gdepth = np.unique(np.concatenate((depth_low_1, depth_high)))
+gdepth = np.sort(gdepth)
+
 W = 15  # half-width of plate boundaries zone (km)
-dx = 0.1  # grid spacing (degree)   # keep same spacing with slab geometry
 depth_limit = 50  # Max depth for Bound in km
 
 # Read in Bird-2003 plate boundaries --- collected by Sam
@@ -55,9 +104,9 @@ lat_interp_func = interp1d(lat_filtered, lat_filtered, kind='linear', fill_value
 lon_new = lon_interp_func(new_lon)
 lat_new = lat_interp_func(new_lat)
 
-# Initialize the gridded arrays with appropriate longitude and latitude ranges
-glon1 = np.linspace(min_lon, max_lon, int((max_lon - min_lon) / dx) + 1, endpoint=True, dtype=np.float32)  # longitude range from min_lon to max_lon
-glat1 = np.linspace(min_lat, max_lat, int((max_lat - min_lat) / dx) + 1, endpoint=True, dtype=np.float32)  # latitude range from min_lat to max_lat
+# # Initialize the gridded arrays with appropriate longitude and latitude ranges
+# glon1 = np.arange(min_lon, max_lon + dx, dx, dtype=np.float32)  # longitude range from min_lon to max_lon
+# glat1 = np.arange(min_lat, max_lat + dx, dx, dtype=np.float32)  # latitude range from min_lat to max_lat
 Bound = np.zeros((len(glat1), len(glon1)), dtype=np.uint8)
 Slab = np.zeros((len(glat1), len(glon1)), dtype=np.uint8)
 Crust = np.zeros((len(glat1), len(glon1)), dtype=np.uint8)
@@ -67,19 +116,17 @@ glat, glon = np.meshgrid(glat1, glon1, indexing='ij')
 dlat = 6371 * 1000 * (np.pi) / 180    
 dlon = 6371 * 1000 * (np.pi) / 180 * np.cos(np.radians(lat_new))  
 
+
 print("Created grid")
 
 # Iterate through lon, lat and update Bound array
 for i in range(len(lon)):
-    d = np.sqrt(((glon - lon[i]) * dlon[i])**2 + ((glat - lat[i]) * dlat)**2) / 1000
-    Bound |= (d <= W)
+    d = np.sqrt(((lon[i] - glon) * dlon[i])**2 + ((lat[i] - glat) * dlat)**2) / 1000 
+    Bound[d <= W] = 1  # Assign plate boundaries where the distance is within the boundary width
 
 # Apply binary dilation to ensure continuity of plate boundaries (closing small gaps)
-# struct = generate_binary_structure(2, 2)  # Structuring element for dilation
-struct = np.ones((5, 5), dtype=bool)  # square 3x3 neighborhood
-Bound = binary_dilation(Bound, structure=struct, iterations=3).astype(np.uint8)  # Dilation to remove gaps
-from scipy.ndimage import binary_erosion
-Bound = binary_erosion(Bound, structure=np.ones((2, 2)), iterations=4).astype(np.uint8)
+struct = generate_binary_structure(2, 2)  # Structuring element for dilation
+Bound = binary_dilation(Bound, structure=struct, iterations=2).astype(np.uint8)  # Dilation to remove gaps
 
 print("Added plate boundaries with dilation")
 
@@ -91,25 +138,9 @@ slab = slab2_file.variables['slabs1'][:]  # Slab (slabs1) from sam_geometry
 slab2_file.close()
 
 # Extend gdepth as in the parent script by appending additional depth values
-# gdepth = np.concatenate((depth, [240, 250, 260, 270, 280, 290, 300, 2900]))  # Extension
+gdepth = np.concatenate((depth, [240, 250, 260, 270, 280, 290, 300, 2900]))  # Extension
+gdepth = np.unique(gdepth)  # Ensure unique values
 
-print("read in slab geometry")
-
-# Ensure correct broadcasting instead of tiling
-Slab = np.broadcast_to(slab, (len(glat1), len(glon1), slab.shape[-1]))  # Keep slab's last dimension
-Crust = np.broadcast_to(slab_C, (len(glat1), len(glon1), slab_C.shape[-1]))  # Match depth dimension
-
-print("Added plate boundaries with dilation")
-
-# Add in slab plate boundaries
-slab2_file = nc.Dataset("/home/vturino/PhD/projects/forearc_deformation/slab_geometries/sam_geometry.nc", 'r')
-depth = slab2_file.variables['gdepth1'][:]
-slab_C = slab2_file.variables['Composi1'][:]  # Crust (Composi1) from sam_geometry
-slab = slab2_file.variables['slabs1'][:]  # Slab (slabs1) from sam_geometry
-slab2_file.close()
-
-
-print("read in slab geometry")
 
 # Ensure correct broadcasting instead of tiling
 Slab = np.broadcast_to(slab, (len(glat1), len(glon1), slab.shape[-1]))  # Keep slab's last dimension
@@ -130,10 +161,9 @@ C_bound[Bound == 1] = 1  # Assign Bound regions
 C_slab[Slab == 1] = 2   # Assign Slab regions (from slabs1)
 C_crust[Crust != 0] = 3  # Assign Crust regions (from Composi1)
 
-C_bound[Slab == 1] = 0  # Clear Bound regions where Slab is present
-C_bound[Crust != 0] = 0  # Clear Bound regions where Crust is present
-
-print("assigned initial compositional fields")
+# Set plate boundary to 0 where Slab or Crust is not 0
+C_bound[(C_slab != 0)  | (C_crust != 0)] = 0  
+print("assigned initial ompositional fields")
 
 # ================================================== Load and preprocess lithosphere/continent thickness data ===============================================
 
@@ -291,9 +321,8 @@ crust_depth_limit = 15  # km
 nazca = nazca[(nazca['lon'] >= min_lon) & (nazca['lon'] <= max_lon) & (nazca['lat'] >= min_lat) & (nazca['lat'] <= max_lat)]
 southamerica = southamerica[(southamerica['lon'] >= min_lon) & (southamerica['lon'] <= max_lon) & (southamerica['lat'] >= min_lat) & (southamerica['lat'] <= max_lat)]
 
-
 # Choose which side to assign as 'crust'
-# correct_side = 'left'  # or 'right'
+correct_side = 'left'  # or 'right'
 
 # Extend the plate on the right side if needed
 if correct_side == 'left':
@@ -319,7 +348,7 @@ if not southamerica.iloc[0].equals(southamerica.iloc[-1]):
     southamerica = pd.concat([southamerica, southamerica.iloc[[0]]], ignore_index=True)
 
 # Create polygons
-nazca_polygon = Polygon(zip(nazca['lon'], nazca['lat'])).buffer(0.02)
+nazca_polygon = Polygon(zip(nazca['lon'], nazca['lat']))
 southamerica_polygon = Polygon(zip(southamerica['lon'], southamerica['lat']))
 
 print("created polygons for SP and OP")
@@ -328,8 +357,6 @@ print("created polygons for SP and OP")
 # Precompute the polygon masks
 nazca_mask = np.array([[nazca_polygon.covers(Point(glon1[j], glat1[i])) for j in range(len(glon1))] for i in range(len(glat1))])
 southamerica_mask = np.array([[southamerica_polygon.covers(Point(glon1[j], glat1[i])) for j in range(len(glon1))] for i in range(len(glat1))])
-
-
 
 C_OP = np.zeros_like(C_crust, dtype=np.uint8)
 
@@ -354,26 +381,6 @@ for i in range(len(glat1)):
             elif nazca_mask[i, j]:
                 # Assign OP for Nazca
                 C_OP[i, j, depth <= local_op_depth_limit] = 4
-
-# Approximate bounding box with some padding
-lon_min, lon_max = 279.7, 283
-lat_min, lat_max = 4.2, 7.8
-
-
-# Find index masks
-lon_mask = (glon1 >= lon_min) & (glon1 <= lon_max)
-lat_mask = (glat1 >= lat_min) & (glat1 <= lat_max)
-i_lat = np.where(lat_mask)[0]
-j_lon = np.where(lon_mask)[0]
-
-# Loop through the grid section
-for i in i_lat:
-    for j in j_lon:
-        if np.all(C_crust[i, j, :] == 0) or np.all(C_slab[i, j, :] == 0):
-            # Use same fill logic
-            C_crust[i, j, depth <= crust_depth_limit] = 3
-            C_slab[i, j, (depth > crust_depth_limit) & (depth <= newlith[i, j])] = 2
-
 
 # # Fill based on correct side and depth constraints
 # for i in range(len(glat1)):
@@ -450,33 +457,34 @@ for lat_val, lon_val in coords:
             if d <= local_op_depth_limit:
                 C_slab[lat_idx, lon_idx, k] = 2  # Fill slab up to lithosphere depth
             elif d > local_op_depth_limit and d <= slab_depth_limit:
-                C_crust[lat_idx, lon_idx, k] = 3  # Fill the boundary above slab
-                C_slab[lat_idx, lon_idx, k] = 0  # Clear slab above lithosphere depth
+                C_slab[lat_idx, lon_idx, k] = 3  # Fill the boundary above slab
 
 
 print("smoothed crust composition")
 
-# close small holes in crust
-# struct = np.ones((1, 2, 1), dtype=bool)  # Structuring element for dilation
-# C_crust = binary_dilation(C_crust, structure=struct, iterations=1).astype(np.uint8)  # Dilation to remove gaps
-# C_crust[C_crust == 1] = 3  # Set crust to 3
-# C_slab = binary_dilation(C_slab, structure=struct, iterations=1).astype(np.uint8)  # Dilation to remove gaps
-# C_slab[C_slab == 1] = 2  # Set slab to 2
+# C_slab = ndimage.binary_closing(C_slab , structure=np.ones((3, 3, 3)))
+# C_slab = C_slab.astype(np.uint8)
+# C_slab[C_slab==1] = 2
+
+# C_crust[:,:,1:] = ndimage.binary_closing(C_crust[:,:,1:], structure=np.ones((3, 3, 3)))
+# C_crust = C_crust.astype(np.uint8)
+# C_crust[C_crust==1] = 3
+
+# C_bound[:,:,1:] = ndimage.binary_closing(C_bound[:,:,1:] , structure=np.ones((3, 3, 3)))
+# C_bound = C_bound.astype(np.uint8)
+
+# C_OP[:,:,1:] = ndimage.binary_closing(C_OP[:,:,1:] , structure=np.ones((3, 3, 3)))
+# C_OP = C_OP.astype(np.uint8)
+# C_OP[C_OP==1] = 4
+
 
 # Clear overlapping values
-# C_bound[(C_crust == 3) | (C_slab == 2) | (C_OP == 4) ]= 0
-# Iterate through the grid to adjust C_bound based on C_crust
-for i in range(C_OP.shape[0]):  # Latitude
-    for j in range(C_OP.shape[1]):  # Longitude
-        # Find the first crust depth index (i.e., top of crust)
-        crust_indices = np.where(C_crust[i, j, :] == 3)[0]
-        if crust_indices.size > 0:
-            crust_top = crust_indices[0]
+mask = (C_bound == 1)  | (C_crust == 3) | (C_slab == 2)
+C_OP[mask] = 0
+C_crust[(C_bound == 1)] = 0
+C_slab[(C_bound == 1)  | (C_crust == 3)] = 0
 
-            # Remove OP starting from that crust depth and downward
-            C_OP[i, j, crust_top:] = 0
 
-gdepth = depth
 
 # Save compositional fields as separate arrays
 ds = nc.Dataset('/home/vturino/PhD/projects/forearc_deformation/slab_geometries/sam_geometry_continents.nc', 'w', format="NETCDF4")
@@ -491,7 +499,7 @@ glat_var = ds.createVariable('glat_var', np.float32, ('glat_di',))
 glat_var[:] = glat1
 
 gdepth_var = ds.createVariable('gdepth_var', np.float32, ('gdepth_di',))
-gdepth_var[:] = gdepth
+gdepth_var[:] = depth
 
 C_bound_var = ds.createVariable('C_bound', 'i1', ('glat_di', 'glon_di', 'gdepth_di'))
 C_bound_var[:] = C_bound
@@ -512,51 +520,11 @@ ds.close()
 
 print("saved nc file")
 
-fname = '/home/vturino/PhD/projects/forearc_deformation/slab_geometries/sam_geometry_continents.txt'
-glon = np.linspace(min_lon, max_lon, int((max_lon - min_lon) / dx) + 1, endpoint=True, dtype=np.float32)
-glat = np.linspace(min_lat, max_lat, int((max_lat - min_lat) / dx) + 1, endpoint=True, dtype=np.float32)
-glatm, glonm, gdepthm,= np.meshgrid(glat, glon, gdepth, indexing = 'ij')
-# convert into spherical coordinates
-r = (6371-gdepthm)*1000 
-phi = glonm *np.pi /180
-theta = (90 - glatm) * np.pi / 180
-print(phi.shape, theta.shape)
-
-r = r[:,:-1,:]
-phi = phi[:,:-1,:]
-theta = theta[:,:-1,:]
-
-with open (fname, 'w') as fid:
-    fid.write('# POINTS: ' + str(r.shape[2]) + ' ' + str(r.shape[1]) + ' ' + str(r.shape[0]) + '\n')
-    fid.write('# Columns: r phi theta plbd crust slab op\n')
-    fid.write('# Bird plate boundaries, width of boundary zone 30 km (Composition 1) \n')
-    fid.write('# Dipping boundaries above slabs, following SLAB2 slab top \n')
-    fid.write('# Plate boundaries go as deep as lithosphere, from Steinberger and Becker 2018 \n')
-    fid.write('# Rest of mantle is background orrrr I can continents information\n')
-    
-    if theta[1, 0, 0] > theta[0, 0, 0]:
-        ii = range(r.shape[0])
-    else:
-        ii = range(r.shape[0]-1, -1, -1)
 
 
-    if phi[0, 1, 0] > phi[0, 0, 0]:
-        jj = range(r.shape[1])
-    else:
-        jj = range(r.shape[1]-1, -1, -1)
 
-    if r[0, 0, 1] > r[0, 0, 0]:
-        kk = range(r.shape[2])
-    else:
-        kk = range(r.shape[2]-1, -1, -1)
 
-    for i in ii:  # Vary colatitude
-        for j in jj:  # Vary longitude
-            for k in kk:  # Vary radius (increasing)
-                fid.write("%.0f %.4f %.4f %i %i %i %i \n" % (
-                    r[i,j,k], phi[i,j,k], theta[i,j,k],
-                    C_bound[i,j,k], C_crust[i,j,k], C_slab[i,j,k], C_OP[i,j,k]
-                ))
-         
-T2=time.time()
-print(T2-T1)
+
+
+
+

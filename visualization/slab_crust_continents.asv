@@ -5,8 +5,6 @@ addpath("/home/vturino/PhD/projects/forearc_deformation/slab_geometries/");
 % temp_path = 'temp_with_slab2supp_modified_and_SAVANI.nc';
 % addpath("/home/vturino/PhD/projects/forearc_deformation/lithosphere_data/");
 
-% 
-
 
 % Get the variable ID
 lon = ncread(file_path, 'glon_var');
@@ -16,6 +14,8 @@ bound = ncread(file_path, 'C_bound');
 slab = ncread(file_path, 'C_slab');
 crust = ncread(file_path, 'C_crust');
 cont = ncread(file_path, 'continents');
+op = ncread(file_path, 'C_OP');
+sp = ncread(file_path, 'C_SP');
 
 % Access the data
 [glonm,glatm,gdepthm] = meshgrid(lon,lat,dep);
@@ -26,14 +26,24 @@ bound1=permute(bound, [3,2,1]);
 cont1=permute(cont, [3,2,1]);
 slab1=permute(slab, [3,2,1]);
 crust1=permute(crust, [3,2,1]);
+op1=permute(op, [3,2,1]);
+sp1=permute(sp, [3,2,1]);
 
 % Print some statistics about the data for debugging
-disp(['C range: ', num2str(min(c1(:))), ' to ', num2str(max(c1(:)))]);
+disp(['Plate boundary range: ', num2str(min(bound1(:))), ' to ', num2str(max(bound1(:)))]);
 disp(['Continent range: ', num2str(min(cont1(:))), ' to ', num2str(max(cont1(:)))]);
+disp(['Slab range: ', num2str(min(slab1(:))), ' to ', num2str(max(slab1(:)))]);
+disp(['Crust range: ', num2str(min(crust1(:))), ' to ', num2str(max(crust1(:)))]);
+disp(['SP range: ', num2str(min(op1(:))), ' to ', num2str(max(op1(:)))]);
+disp(['OP range: ', num2str(min(op1(:))), ' to ', num2str(max(op1(:)))]);
+
 
 
 vtkwrite('paraview_inputs/sam_cont.vtk', ...
     'structured_grid', x*1000, y*1000, z*1000, ...
-    'scalars', 'slab_geometry', c1, ...
-    'scalars', 'crust_geometry', cont1, ...
+    'scalars', 'plate_boundaries', bound1, ...
+    'scalars', 'crust', crust1, ...
+    'scalars', 'slab', slab1, ...
+    'scalars', 'op', op1, ...
+    'scalars', 'continent', cont1, ...
     'binary');
