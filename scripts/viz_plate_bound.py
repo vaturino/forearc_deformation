@@ -6,6 +6,7 @@ import numpy as np
 import os
 import pandas as pd
 from scipy.io import savemat
+from shapely.geometry import Point, Polygon
 
 
 # Function to convert longitude from -180 to 180 to 0 to 360
@@ -78,7 +79,7 @@ def is_close_enough(coord1, coord2, tolerance=1e-6):
 
 
 # Define the regions to plot
-regions_to_plot = ['NZ', 'SA']  # List of regions to plot
+regions_to_plot = ['NZ', 'SA', 'ND']  # List of regions to plot
 
 # Path to your .dig file
 file_path = '/home/vturino/PhD/projects/forearc_deformation/plates/pb2002_plates.dig'  # Update with actual path
@@ -100,6 +101,7 @@ t_min_lat, t_max_lat = -5, 5   # Min and max latitude range for the mods
 # Initialize arrays to store coordinates for each region
 coords_NZ = []
 coords_SA = []
+coords_NAP = []
 
 # Extract the coordinates for NZ and SA regions
 for region, coords in plate_boundaries.items():
@@ -107,16 +109,22 @@ for region, coords in plate_boundaries.items():
         coords_NZ = coords  # Save NZ coordinates into coords_NZ
     elif region == 'SA':
         coords_SA = coords  # Save SA coordinates into coords_SA
+    elif region == 'ND':
+        coords_NAP = coords
 
 coords_NZ = pd.DataFrame(coords_NZ)
 coords_SA = pd.DataFrame(coords_SA)
+coords_NAP = pd.DataFrame(coords_NAP)
+
 
 coords_NZ.columns = ['lon', 'lat']
 coords_SA.columns = ['lon', 'lat']
+coords_NAP.columns = ['lon', 'lat']
 
 #limit coordinates to the defined range
 coords_NZ = coords_NZ[(coords_NZ['lon'] >= min_lon) & (coords_NZ['lon'] <= max_lon) & (coords_NZ['lat'] >= min_lat) & (coords_NZ['lat'] <= max_lat)]
 coords_SA = coords_SA[(coords_SA['lon'] >= min_lon) & (coords_SA['lon'] <= max_lon) & (coords_SA['lat'] >= min_lat) & (coords_SA['lat'] <= max_lat)]
+coords_NAP = coords_NAP[(coords_NAP['lon'] >= min_lon) & (coords_NAP['lon'] <= max_lon) & (coords_NAP['lat'] >= min_lat) & (coords_NAP['lat'] <= max_lat)]
 
 
 
@@ -135,11 +143,64 @@ if not coords_SA.empty:
 else:
     print(f"SA coordinates are empty, skipping...")
 
+if not coords_NAP.empty:
+    print(f"NAP coordinates are not empty, processing...")
+else:
+    print(f"NAP coordinates are empty, skipping...")
+
 # Ensure coordinates are filtered within the extent
 coords_NZ = coords_NZ[(coords_NZ['lon'] >= min_lon) & (coords_NZ['lon'] <= max_lon) & 
                        (coords_NZ['lat'] >= min_lat) & (coords_NZ['lat'] <= max_lat)]
 coords_SA = coords_SA[(coords_SA['lon'] >= min_lon) & (coords_SA['lon'] <= max_lon) & 
                        (coords_SA['lat'] >= min_lat) & (coords_SA['lat'] <= max_lat)]
+coords_NAP = coords_NAP[(coords_NAP['lon'] >= min_lon) & (coords_NAP['lon'] <= max_lon) &
+                          (coords_NAP['lat'] >= min_lat) & (coords_NAP['lat'] <= max_lat)]
+
+# Step 1: Find the common point between the three datasets
+# We'll take the first point of coords_SA and check if it exists in both coords_NZ and coords_NAP
+common_point = coords_SA.iloc[0]
+
+# Check if the common point exists in coords_NZ and coords_NAP
+def find_common_point(coords, point):
+    return coords[(coords['lon'] == point['lon']) & (coords['lat'] == point['lat'])]
+
+# Find the common point in all datasets
+common_in_NZ = find_common_point(coords_NZ, common_point)
+common_in_NAP = find_common_point(coords_NAP, common_point)
+
+# If common point is not found in all datasets, choose a matching point
+if common_in_NZ.empty or common_in_NAP.empty:
+    # Find common coordinates between the three datasets
+    common_coords = pd.merge(pd.merge(coords_SA, coords_NZ, on=['lon', 'lat']), coords_NAP, on=['lon', 'lat'])
+    
+    if not common_coords.empty:
+        # Use the first common point
+        common_point = common_coords.iloc[0]
+    else:
+        # If no common point, you may need to define a fallback strategy (e.g., using nearest point)
+        print("No exact common point found.")
+        # You could use a nearest matching strategy here if needed (like calculating distances)
+
+# Step 2: Reorder datasets to start with the common point
+def reorder_to_common_point(coords, common_point):
+    # Find the index of the common point
+    idx = coords[(coords['lon'] == common_point['lon']) & (coords['lat'] == common_point['lat'])].index[0]
+    # Reorder the dataframe starting from that common point
+    return pd.concat([coords.iloc[idx:], coords.iloc[:idx]]).reset_index(drop=True)
+
+# Reorder all datasets
+coords_SA = reorder_to_common_point(coords_SA, common_point)
+coords_NZ = reorder_to_common_point(coords_NZ, common_point)
+coords_NAP = reorder_to_common_point(coords_NAP, common_point)
+
+coords_SA = pd.concat([coords_SA, coords_NAP], ignore_index=True)
+
+#drop duplicates
+coords_SA = coords_SA.drop_duplicates(subset=['lon', 'lat'], keep=False)
+#close the loop
+if not coords_SA.iloc[0].equals(coords_SA.iloc[-1]):
+    coords_SA = pd.concat([coords_SA, coords_SA.iloc[[0]]], ignore_index=True)
+
 
 
 # Copy SA coordinates so we can adjust them
@@ -177,13 +238,6 @@ for idx, row in coords_SA_adjusted.iterrows():
 
 
 
-if not coords_SA_adjusted.iloc[0].equals(coords_SA_adjusted.iloc[-1]):
-    coords_SA_adjusted = pd.concat([coords_SA_adjusted, coords_SA_adjusted.iloc[[0]]], ignore_index=True)
-
-if not coords_NZ.iloc[0].equals(coords_NZ.iloc[-1]):
-    coords_NZ = pd.concat([coords_NZ, coords_NZ.iloc[[0]]], ignore_index=True)
-
-
 
 # Check if the first and last coordinates are the same, and if so, loop them back to close the loop
 if not coords_SA_adjusted.iloc[0].equals(coords_SA_adjusted.iloc[-1]):
@@ -192,35 +246,65 @@ if not coords_SA_adjusted.iloc[0].equals(coords_SA_adjusted.iloc[-1]):
 if not coords_NZ.iloc[0].equals(coords_NZ.iloc[-1]):
     coords_NZ = pd.concat([coords_NZ, coords_NZ.iloc[[0]]], ignore_index=True)
 
+#fill the inside of nz and sa: coords_nx and coords sa now also contain the interion of the nz and sa polygons
+coords_NZ = coords_NZ.reset_index(drop=True)
+coords_SA_adjusted = coords_SA_adjusted.reset_index(drop=True)
 
+# # Create a polygon from the NZ coordinates (assuming it's a closed curve)
+# nazca_polygon = Polygon(coords_NZ[['lon', 'lat']].values)
 
-# Remove the original points in the specified range
-coords_NZ = coords_NZ[~(coords_NZ['lon'].between(280.5, 282.5) & coords_NZ['lat'].between(5, 8))]
+# # Generate a grid of points within the bounding box of the NZ polygon
+# lon_min, lat_min, lon_max, lat_max = nazca_polygon.bounds
+# grid_lon = np.arange(lon_min, lon_max, 0.1)  # Adjust step size as needed
+# grid_lat = np.arange(lat_min, lat_max, 0.1)  # Adjust step size as needed
 
-# # Find the last point of the Nazca plate (SA) at approximately 7 degrees latitude and 280 degrees longitude
-# last_point = coords_NZ[(coords_NZ['lon'] >= 280) & (coords_NZ['lon'] <= 283) & (coords_NZ['lat'] <= 8) & (coords_NZ['lat'] >= 6)].iloc[-1]
-# first_point = coords_SA[(coords_SA['lon'] >= 287) & (coords_SA['lon'] <= 289) & (coords_SA['lat'] <= 8) & (coords_SA['lat'] >= 7.5)].iloc[0]
+# # Create a list of points inside the polygon
+# points_inside = []
+# for lon in grid_lon:
+#     for lat in grid_lat:
+#         point = Point(lon, lat)
+#         if nazca_polygon.contains(point):
+#             points_inside.append({'lon': lon, 'lat': lat})
 
-# # extend nazca between the two points
-# coords_NZ = pd.concat([coords_NZ, pd.DataFrame({'lon': [last_point['lon'], first_point['lon']], 'lat': [last_point['lat'], first_point['lat']]})], ignore_index=True)
-# # Remove the original points in the specified range
-# coords_NZ = coords_NZ[~(coords_NZ['lon'].between(280.5, 282.5) & coords_NZ['lat'].between(5, 8))]
-# # between t
+# # Convert the points inside to a DataFrame
+# points_inside_df = pd.DataFrame(points_inside)
+
+# # Add the points inside to coords_NZ
+# coords_NZ = pd.concat([coords_NZ, points_inside_df], ignore_index=True)
+
+# # do the same for coords_SA_adjusted
+# # Create a polygon from the SA coordinates (assuming it's a closed curve)
+# sa_polygon = Polygon(coords_SA_adjusted[['lon', 'lat']].values)
+# # Generate a grid of points within the bounding box of the SA polygon
+# lon_min, lat_min, lon_max, lat_max = sa_polygon.bounds
+# grid_lon = np.arange(lon_min, lon_max, 0.1)  # Adjust step size as needed
+# grid_lat = np.arange(lat_min, lat_max, 0.1)  # Adjust step size as needed
+# # Create a list of points inside the polygon
+# points_inside = []
+# for lon in grid_lon:
+#     for lat in grid_lat:
+#         point = Point(lon, lat)
+#         if sa_polygon.contains(point):
+#             points_inside.append({'lon': lon, 'lat': lat})
+# # Convert the points inside to a DataFrame
+# points_inside_df = pd.DataFrame(points_inside)
+# # Add the points inside to coords_SA_adjusted
+# coords_SA_adjusted = pd.concat([coords_SA_adjusted, points_inside_df], ignore_index=True)
+# # Remove duplicates from coords_NZ and coords_SA_adjusted
+# coords_NZ = coords_NZ.drop_duplicates(subset=['lon', 'lat'], keep="first")
+# coords_SA_adjusted = coords_SA_adjusted.drop_duplicates(subset=['lon', 'lat'], keep="first")
+
+# plt.scatter(coords_NZ['lon'], coords_NZ['lat'], color='blue', label='NZ Points', s=1)
+# plt.scatter(coords_SA_adjusted['lon'], coords_SA_adjusted['lat'], color='red', label='SA Points', s=1)
+# plt.show()
+# exit()
 
 
 #save a copy of adjusted Sa and NZ coordinates
 coords_SA_adjusted.to_csv('/home/vturino/PhD/projects/forearc_deformation/plates/coords_SA_adjusted.csv', index=False)
 coords_NZ.to_csv('/home/vturino/PhD/projects/forearc_deformation/plates/coords_NZ.csv', index=False)
 
-# Create a figure and plot just the boundaries, no coastline
-fig, ax = plt.subplots(figsize=(10, 10))
-# plt.scatter(last_point['lon'], last_point['lat'], color='green', label='Last Point of NZ Plate')
-# plt.scatter(first_point['lon'], first_point['lat'], color='orange', label='First Point of SA Plate')
-ax.plot(coords_NZ['lon'], coords_NZ['lat'], color='blue', linewidth=2, label='NZ Plate Boundary')
-ax.plot(coords_SA_adjusted['lon'], coords_SA_adjusted['lat'], color='red', linewidth=2, label='SA Plate Boundary')
-plt.legend()
-plt.show()
-exit()
+
 
 
 tolerance = 1e-6  # Define a tolerance for matching coordinates
@@ -245,6 +329,13 @@ coords_NZ['lon_diff'] = coords_NZ['lon'].diff().abs()
 coords_NZ['lat_diff'] = coords_NZ['lat'].diff().abs()
 coords_NZ = coords_NZ[(coords_NZ['lon_diff'] < 10) & (coords_NZ['lat_diff'] < 10)]
 coords_NZ = coords_NZ.drop(columns=['lon_diff', 'lat_diff'])
+
+# if fist point of nx is different than the last point of SA, make it equal to the last point of SA
+if not coords_NZ.iloc[0].equals(coords_SA_adjusted.iloc[-1]):
+    coords_NZ.iloc[0] = coords_SA_adjusted.iloc[-1]
+# if last point of nz is different than the first point of SA, make it equal to the first point of SA
+if not coords_NZ.iloc[-1].equals(coords_SA_adjusted.iloc[0]):   
+    coords_NZ.iloc[-1] = coords_SA_adjusted.iloc[0]
 
 
 
@@ -286,10 +377,10 @@ savemat('/home/vturino/PhD/projects/forearc_deformation/plates/plate_boundaries.
 
 # Create a figure and plot just the boundaries, no coastline
 fig, ax = plt.subplots(figsize=(10, 10))
-# ax.plot(coords_NZ['lon'], coords_NZ['lat'], color='blue', linewidth=2, label='NZ Plate Boundary')
-# ax.plot(coords_SA_adjusted['lon'], coords_SA_adjusted['lat'], color='red', linewidth=2, label='SA Plate Boundary')
-ax.scatter(coords_NZ['lon'], coords_NZ['lat'], color='blue', label='NZ Points', s=10)
-ax.scatter(coords_SA_adjusted['lon'], coords_SA_adjusted['lat'], color='red', label='SA Points', s=10)
+ax.plot(coords_NZ['lon'], coords_NZ['lat'], color='blue', linewidth=2, label='NZ Plate Boundary')
+ax.plot(coords_SA_adjusted['lon'], coords_SA_adjusted['lat'], color='red', linewidth=2, label='SA Plate Boundary')
+# ax.scatter(coords_NZ['lon'].iloc[0], coords_NZ['lat'].iloc[0], color='blue', label='NZ Points', s=100)
+# ax.scatter(coords_SA_adjusted['lon'].iloc[0], coords_SA_adjusted['lat'].iloc[0], color='red', label='SA Points', s=100)
 plt.legend()
 plt.show()
 
