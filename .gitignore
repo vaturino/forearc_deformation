@@ -1,3 +1,4 @@
+raw_outputs/
 savani_data.csv
 visualization/paraview_inputs/*
 slab_geometries/
