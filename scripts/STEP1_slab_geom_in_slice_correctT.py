@@ -40,7 +40,8 @@ T1 = time.time()
 
 # Define grid resolution to match the global script
 dx = 0.1  # Longitude grid resolution
-dz = 10   # Depth grid resolution
+dz = 5   # Depth grid resolution
+hr_depth = 300 # Depth of high resolution grid
 
 min_lat = -60
 max_lat = 20
@@ -50,12 +51,18 @@ max_lon = 320
 # Define regional grid setup
 glon = np.linspace(min_lon, max_lon, int((max_lon - min_lon) / dx) + 1, endpoint=True, dtype=np.float32)  # Longitude range
 glat = np.linspace(min_lat, max_lat, int((max_lat - min_lat) / dx) + 1, endpoint=True, dtype=np.float32)  # Latitude range
-gdepth = np.linspace(0, 1100, int(1100 / dz) + 1, endpoint=True, dtype=np.float32)  # Depth range
+gdepth = np.linspace(0, hr_depth, int(hr_depth / dz) + 1, endpoint=True, dtype=np.float32)  # Depth range
+gdepth1 = np.linspace(hr_depth, 1100, int((1100 - hr_depth) / (4*dz)) + 1, endpoint=True, dtype=np.float32)  # Depth range
+gdepth = np.concatenate((gdepth, gdepth1), axis=0)  # Combine depth ranges
+gdepth = np.unique(gdepth)
+
+# print(gdepth)
+# exit()
 
 # Define parameters
 temp_ref = 1573  # Kelvin Mantle interior temperature
 temp_surf = 273  # Surface temperature
-W = 30  # km width of plate boundary zone
+W = 15  # km width of plate boundary zone
 
 # Initialize arrays
 slabs = np.zeros((len(glat), len(glon), len(gdepth)), dtype=bool)
@@ -118,7 +125,7 @@ for filename in fs:
             ix, iy, iz, dnorm = indices
             slabs[iy, ix, iz] = 1
 
-        lon_t = np.linspace(lon[i] - normx * (-W) / Dx, lon[i], 10, endpoint=True)
+        lon_t = np.linspace(lon[i] - normx * (-W) / Dx, lon[i],10, endpoint=True)
         lat_t = np.linspace(lat[i] - normy * (-W) / Dy, lat[i], 10, endpoint=True)
         depth_t = np.linspace(dep[i] + normz * (-W), dep[i], 10, endpoint=True)
 
@@ -157,6 +164,11 @@ for filename in fs:
                             slab_temp[iy, ix, iz] = temp_ref + (temp_surf - temp_ref) * erfc(1.16 * dnorm)
 
     Composi[slabs] = 0
+
+# find index for depth = 200
+depth_limit_index = np.where(gdepth == 200)[0][0]
+# Crust regions below crust_limit are set to 0
+Composi[:, :, depth_limit_index:] = 0
 
 # Save the data to a NetCDF file
 ds = nc.Dataset('../slab_geometries/sam_geometry.nc', 'w', format="NETCDF4")

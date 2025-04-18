@@ -46,8 +46,9 @@ min_lon = 240
 max_lon = 320
 
 # Define structured grid, non-uniform resolution, refined where slabs
-dx = 0.2  # horizontal resolution away from slabs
-dz = 10  # vertical resolution for upper mantle
+dx = 0.1  # horizontal resolution away from slabs
+dz = 5  # vertical resolution for upper mantle
+hr_depth = 300  # depth of high-resolution grid
 slab2_file = nc.Dataset("/home/vturino/PhD/projects/forearc_deformation/slab_geometries/sam_geometry.nc", 'r')  ### Your slab geometry nc file
 glon = slab2_file.variables['glon1'][:]   # 0.2 degree
 glat = slab2_file.variables['glat1'][:]   # 0.2 degree
@@ -77,7 +78,12 @@ lon = np.round(lon, decimals=2)
 lat = np.round(lat, decimals=2)
 
 # Read Savani data
-gdepth1 = np.concatenate((np.arange(0, 670, dz), depth[(depth > 660) & (depth <= 1200)])).astype(np.float32)
+gdepth_hr = np.arange(0, hr_depth + dz, dz).astype(np.float32)
+gdepth_mid = np.arange(hr_depth, 670, 4 * dz).astype(np.float32)
+gdepth_low = np.arange(670, 1200, 6 * dz).astype(np.float32)
+# gdepth1 = np.concatenate((np.arange(0, 670, dz), depth[(depth > 660) & (depth <= 1200)])).astype(np.float32)
+gdepth1 = np.concatenate((gdepth_hr, gdepth_mid)).astype(np.float32)
+gdepth1 = np.unique(gdepth1)  # Remove duplicates
 gdepth1[gdepth1 > 1100] = 1100
 
 
@@ -310,7 +316,9 @@ blended_temp = np.where(
 
 # Final blended temperature (no NaN contamination)
 final_temp = blended_temp.copy()
+final_temp[final_temp < 273] = 273  # Cap negative temperatures to zero C
 
+print(min(final_temp.flatten()), max(final_temp.flatten()))
 
 
 newfn = "/home/vturino/PhD/projects/forearc_deformation/lithosphere_data/temp_with_slab2supp_modified_and_SAVANI.nc"
@@ -373,7 +381,7 @@ with open (fname, 'w') as f:
     for i in ii:  # Vary colatitude
         for j in jj:  # Vary longitude
             for k in kk:  # Vary radius (increasing)
-                f.write(f"%.0f %.3f %.3f %.1f \n" % (r[i,j,k], phi[i,j,k], theta[i,j,k],temp[i,j,k]))
+                f.write(f"%.0f %.3f %.3f %.1f \n" % (r[i,j,k], phi[i,j,k], theta[i,j,k],final_temp[i,j,k]))
                         
 T2=time.time()
 T3=(T2-T1)

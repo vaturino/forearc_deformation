@@ -25,6 +25,8 @@ print(T1)
 W = 15  # half-width of plate boundaries zone (km)
 dx = 0.1  # grid spacing (degree)   # keep same spacing with slab geometry
 depth_limit = 150  # Max depth for Bound in km
+crust_depth_limit = 15  # km
+
 
 # Read in Bird-2003 plate boundaries --- collected by Sam
 data = scipy.io.loadmat('/home/vturino/PhD/projects/forearc_deformation/plates/plate_boundaries.mat')
@@ -159,33 +161,6 @@ newlith = griddata(
 # Optional: mask invalid (land or missing) areas
 newlith = np.ma.masked_invalid(newlith)
 
-
-
-# plt.imshow(newlith, extent=(glon1.min(), glon1.max(), glat1.min(), glat1.max()), origin='lower', interpolation='nearest')
-# plt.colorbar(label='Lithospheric Thickness (km)')
-# plt.show()
-# exit()
-
-
-
-# newlith = interpn((lat_lith, lon_lith), values_lith, (glat, glon), method='linear')
-
-
-# # Initialize the continents array
-# dz = 10
-# continents = np.zeros_like(C_slab)
-
-# # Add continents based on lithosphere thickness
-# for i in range(len(glat1)):
-#     for j in range(len(glon1)):
-#         if newlith[i, j] >= 170:  # Threshold for continents (e.g., 170 km lithosphere thickness)
-#             # Find the depth index range where lithosphere thickness matches
-#             iz = [idx for idx, val in enumerate(depth) if newlith[i, j] >= np.round((val - (dz / 2))) and newlith[i, j] < np.round((val + (dz / 2)))]
-#             iz = iz[0] + 1  # First valid index, plus 1 for depth step
-#             continents[i, j, :iz] = 5  # Assign 1 for continents up to depth index iz
-
-# print("added continents")
-
 # Step 1: Identify where C_crust is 3 (surface crust)
 crust_surface = C_crust[:, :, 0] == 3
 
@@ -267,9 +242,6 @@ coords = np.array(coords)
 # Step 7: fill the correct side with crust and wrong side with OP
 nazca = pd.read_csv('/home/vturino/PhD/projects/forearc_deformation/plates/coords_NZ.csv')
 southamerica = pd.read_csv('/home/vturino/PhD/projects/forearc_deformation/plates/coords_SA_adjusted.csv')
-
-crust_depth_limit = 15  # km
-
 # Limit to our region
 nazca = nazca[(nazca['lon'] >= min_lon) & (nazca['lon'] <= max_lon) & (nazca['lat'] >= min_lat) & (nazca['lat'] <= max_lat)]
 southamerica = southamerica[(southamerica['lon'] >= min_lon) & (southamerica['lon'] <= max_lon) & (southamerica['lat'] >= min_lat) & (southamerica['lat'] <= max_lat)]
@@ -328,30 +300,12 @@ southamerica.reset_index(drop=True, inplace=True)
 nazca_polygon = Polygon(zip(nazca['lon'], nazca['lat']))
 southamerica_polygon = Polygon(zip(southamerica['lon'], southamerica['lat']))
 
-# plt.plot(nazca_polygon.exterior.xy[0], nazca_polygon.exterior.xy[1], color='red', label='Nazca Polygon')
-# plt.plot(southamerica_polygon.exterior.xy[0], southamerica_polygon.exterior.xy[1], color='blue', label='South America Polygon')
-# plt.scatter(nazca['lon'].iloc[0], nazca['lat'].iloc[0], color='red', label='Nazca Start')
-# plt.scatter(southamerica['lon'].iloc[0], southamerica['lat'].iloc[0], color='blue', label='South America Start')
-# plt.scatter(southamerica['lon'].iloc[-1], southamerica['lat'].iloc[-1], color='green', label='Top Point')
-# plt.show()
-# exit()
-
-
-
 print("created polygons for SP and OP")
 
 # Precompute the polygon masks
 nazca_mask = np.array([[nazca_polygon.covers(Point(glon1[j], glat1[i])) for j in range(len(glon1))] for i in range(len(glat1))])
 southamerica_mask = np.array([[southamerica_polygon.covers(Point(glon1[j], glat1[i])) for j in range(len(glon1))] for i in range(len(glat1))])
 
-plt.figure(figsize=(10, 6))
-plt.imshow(southamerica_mask, cmap='Blues', alpha=0.5, origin='lower',
-           extent=[glon1.min(), glon1.max(), glat1.min(), glat1.max()])
-plt.title("South America Mask")
-plt.xlabel("Longitude")
-plt.ylabel("Latitude")
-plt.colorbar(label='Mask Value')
-plt.show()
 
 # Ensure C_OP extends to the right boundary
 C_OP = np.zeros_like(C_crust, dtype=np.uint8)
@@ -371,7 +325,14 @@ for i in range(len(glat1)):
             if southamerica_mask[i, j] and not nazca_mask[i, j]:  # Avoid overlap
                 # Assign OP for South America only if it's not also Nazca
                 C_OP[i, j, depth <= local_op_depth_limit] = 4
-            
+                # Patch crust back in where it was originally defined and OP is not present
+                original_crust = Crust[i, j, :] != 0
+                not_OP = C_OP[i, j, :] == 0
+                within_crust_limit = depth <= crust_depth_limit
+
+                valid_crust_mask = original_crust & not_OP & within_crust_limit
+                C_crust[i, j, valid_crust_mask] = 3
+
 
         else:  # correct_side == 'right'
             if southamerica_mask[i, j]:  # Check if the point belongs to South America
@@ -487,10 +448,10 @@ C_OP[(C_bound == 1) | (C_crust == 3) | (C_slab == 2)] = 0  # Clear OP regions wh
 C = np.zeros_like(C_bound)  # Initialize C array
 C = C_crust+C_OP
 
-plt.imshow(C[:, :, 0], extent=(glon1.min(), glon1.max(), glat1.min(), glat1.max()), origin='lower', interpolation='nearest')
-plt.colorbar(label='Composition')
-plt.show()
-exit()
+# plt.imshow(C[:, :, 0], extent=(glon1.min(), glon1.max(), glat1.min(), glat1.max()), origin='lower', interpolation='nearest')
+# plt.colorbar(label='Composition')
+# plt.show()
+# exit()
 
 
 
