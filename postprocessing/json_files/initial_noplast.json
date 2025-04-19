@@ -1,0 +1,9 @@
+{
+    "model_name": "visco_plastic_chunck_3d_temp_compo",
+    "plot_folder": "visco_plastic_chunck_3d_temp_compo",
+    "leg_title": "legend title",
+    "legend":[
+       "legend label 2"
+    ], 
+    "head_lines": 28
+ }
