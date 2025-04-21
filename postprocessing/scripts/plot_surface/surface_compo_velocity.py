@@ -114,8 +114,10 @@ def main():
         vr = (x * vx + y * vy + z * vz) / r
 
         # Latitude and longitude velocity components (using the correct r for surface points)
-        v_lon = (vx * np.sin(lon) - vy * np.cos(lon)) / (r * np.cos(lat))
-        v_lat = (vx * np.cos(lat) + vy * np.sin(lat)) / r
+        lon = np.radians(lon)
+        lat = np.radians(lat)
+        # v_lon = (vx * np.sin(lon) - vy * np.cos(lon)) / (r * np.cos(lat))
+        # v_lat = (vx * np.cos(lat) + vy * np.sin(lat)) / r
 
         # Combine compositions into one array
         compo = crust + 2*op + 3*plbd
